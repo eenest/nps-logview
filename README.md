@@ -2,6 +2,12 @@
 
 A lightweight application for viewing and decoding Microsoft Network Policy Server (NPS) / Internet Authentication Service (IAS) log files.
 
+[Download v0.21](https://github.com/eenest/nps-logview/releases/tag/v0.21)
+
+## Why This Exists
+
+Microsoft NPS logs are useful but painful to read. This viewer decodes common fields, RADIUS attributes, vendor-specific attributes, request/reply pairs, and rejects so Windows and network admins can get to the answer faster.
+
 Runs in three supported app versions:
 
 - **Linux GTK GUI**
@@ -9,6 +15,18 @@ Runs in three supported app versions:
 - **Windows 32-bit Win32 GUI**
 
 An optional Linux CLI tool may also be built for viewing logs in a terminal shell and smoke-testing parser changes, but it is not a supported app version.
+
+## Screenshots
+
+These static examples use sanitized sample logs from this repository. No real customer, user, host, IP, or MAC address data is shown.
+
+![NPS Log Viewer main grid with decoded request and reply records](doc/screenshots/main-grid.png)
+
+![Rejected-only filter showing a rejected request/reply exchange highlighted in red](doc/screenshots/rejected-filter.png)
+
+![About dialog showing support link and resolved settings file path](doc/screenshots/about-settings.png)
+
+![RADIUS and Vendor-Specific Attribute help reference windows](doc/screenshots/radius-vendor-help.png)
 
 ## Support
 

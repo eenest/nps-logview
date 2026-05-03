@@ -2,6 +2,7 @@
 
 ## v0.21 - Release Candidate
 
+- Added a prominent GitHub release download link, a short "Why This Exists" section, and sanitized README screenshots/examples for the main grid, rejected-only filter, About dialog, and RADIUS/Vendor help references.
 - Added an optional Ko-fi coffee-money tip link in the README, release docs, and Help/About UI; tips are appreciated but never required, and the app remains free software.
 - Made the Ko-fi URL clickable in the Windows About dialog.
 - Improved streamed parser performance by reading file data in chunks instead of byte-by-byte, reducing Windows open-file delays on larger logs.
