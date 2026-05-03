@@ -1,0 +1,11 @@
+Add automated parser tests for malformed input cases:
+
+- empty files
+- random binary data
+- partial XML records
+- very long lines
+- truncated records
+- mixed valid and invalid records
+- oversized fields
+
+Goal: ensure malformed or partially corrupted logs do not crash the parser or GUI.
