@@ -1,0 +1,8 @@
+Allow users to drag a `.log`, `.txt`, or `.csv` file onto the application window to open it.
+
+This should be implemented for both GUI versions:
+
+- Windows Win32 GUI
+- Linux GTK GUI
+
+The behavior should match File -> Open and preserve recent-file handling.
