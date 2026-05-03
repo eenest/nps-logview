@@ -2,7 +2,7 @@
 
 A lightweight application for viewing and decoding Microsoft Network Policy Server (NPS) / Internet Authentication Service (IAS) log files.
 
-[Download v0.21](https://github.com/eenest/nps-logview/releases/tag/v0.21)
+[Download v0.22](https://github.com/eenest/nps-logview/releases/tag/v0.22)
 
 ## Why This Exists
 
@@ -83,10 +83,10 @@ Choose the package for your system:
 
 | System | Package | How to Run |
 |--------|---------|------------|
-| Windows 64-bit | `nps-logview-v0.21-windows-x64.zip` | Unzip, then run `nps-logview.exe` |
-| Windows 32-bit | `nps-logview-v0.21-windows-x86.zip` | Unzip, then run `nps-logview-x86.exe` |
-| Linux x86_64 | `nps-logview-v0.21-linux-x86_64.tar.gz` | Extract, then run `./nps-logview` |
-| Source code | `nps-logview-v0.21-source.tar.gz` | Build from source using the commands below |
+| Windows 64-bit | `nps-logview-v0.22-windows-x64.zip` | Unzip, then run `nps-logview.exe` |
+| Windows 32-bit | `nps-logview-v0.22-windows-x86.zip` | Unzip, then run `nps-logview-x86.exe` |
+| Linux x86_64 | `nps-logview-v0.22-linux-x86_64.tar.gz` | Extract, then run `./nps-logview` |
+| Source code | `nps-logview-v0.22-source.tar.gz` | Build from source using the commands below |
 
 Each binary package includes sanitized sample logs under `logs/`, so you can test the viewer immediately without using real NPS data.
 
@@ -101,12 +101,12 @@ The Windows binaries are unsigned for this release. Windows SmartScreen may show
 
 ### Linux
 
-1. Download `nps-logview-v0.21-linux-x86_64.tar.gz`.
+1. Download `nps-logview-v0.22-linux-x86_64.tar.gz`.
 2. Extract it:
 
 ```bash
-tar -xzf nps-logview-v0.21-linux-x86_64.tar.gz
-cd nps-logview-v0.21-linux-x86_64
+tar -xzf nps-logview-v0.22-linux-x86_64.tar.gz
+cd nps-logview-v0.22-linux-x86_64
 ```
 
 3. Run it:

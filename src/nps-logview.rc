@@ -7,7 +7,7 @@ CAPTION "About NPS Log Viewer"
 FONT 9, "MS Shell Dlg"
 BEGIN
     ICON 1, 101, 16, 16, 128, 128
-    LTEXT "NPS Log Viewer v0.21\n(C) 2026, Eugene Nesterenko - eenest@eenest.net\n\nDecodes Microsoft NPS/IAS RADIUS logs.\n\nSupports XML and CSV log formats. RADIUS attribute codes and common option values are automatically translated to human-readable text.\n\nNPS Log Viewer is free software. If it saves you time, coffee-money tips are appreciated but never required:", -1, 156, 16, 248, 142
+    LTEXT "NPS Log Viewer v0.22\n(C) 2026, Eugene Nesterenko - eenest@eenest.net\n\nDecodes Microsoft NPS/IAS RADIUS logs.\n\nSupports XML and CSV log formats. RADIUS attribute codes and common option values are automatically translated to human-readable text.\n\nNPS Log Viewer is free software. If it saves you time, coffee-money tips are appreciated but never required:", -1, 156, 16, 248, 142
     CONTROL "<a href=""https://ko-fi.com/eenest"">https://ko-fi.com/eenest</a>", 102, "SysLink", 0x50010000, 156, 161, 248, 12
     LTEXT "Settings file:", -1, 156, 184, 248, 10
     CONTROL "", 103, "Edit", 0x50810880, 156, 197, 248, 14

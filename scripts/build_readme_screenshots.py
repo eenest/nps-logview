@@ -137,7 +137,7 @@ def draw_details(draw, x, y, w, h, lines, red=False):
 def main_grid():
     img = Image.new("RGB", (1400, 900), BG)
     d = ImageDraw.Draw(img)
-    window(d, "NPS Log Viewer v0.21", img.size)
+    window(d, "NPS Log Viewer v0.22", img.size)
     draw_filter(d, 98)
     rows = [
         {"time": "04/30/2026 08:15:22.103", "user": "CORPN\\alice", "packet": "1 (Access-Request)", "result": "0 (IAS_SUCCESS)", "nas_ip": "192.0.2.10", "client": "CORPN-WiFi", "calling": "02-00-00-00-00-01", "auth": "EAP-MSCHAP v2", "policy": "CORPN-DOT1X-Policy"},
@@ -165,7 +165,7 @@ def main_grid():
 def rejected_filter():
     img = Image.new("RGB", (1400, 820), BG)
     d = ImageDraw.Draw(img)
-    window(d, "NPS Log Viewer v0.21", img.size)
+    window(d, "NPS Log Viewer v0.22", img.size)
     draw_filter(d, 98, rejected=True)
     rows = [
         {"time": "04/30/2026 08:30:12.356", "user": "CORPN\\denied-user", "packet": "1 (Access-Request)", "result": "0 (IAS_SUCCESS)", "nas_ip": "192.0.2.10", "client": "CORPN-WiFi", "calling": "02-00-00-00-00-02", "auth": "7 (None)", "policy": "CORPN-DOT1X-Policy", "rejected": True},
@@ -199,7 +199,7 @@ def about_box():
     text(d, (98, 205), "LOG", fill="#ffe600", fnt=font(38, bold=True))
     x = 310
     lines = [
-        ("NPS Log Viewer v0.21", F_UI_BOLD),
+        ("NPS Log Viewer v0.22", F_UI_BOLD),
         ("(C) 2026, Eugene Nesterenko - eenest@eenest.net", F_UI),
         ("", F_UI),
         ("Decodes Microsoft NPS/IAS RADIUS logs.", F_UI),

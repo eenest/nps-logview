@@ -25,7 +25,7 @@
 
 #define MAX_LIST_COLS 16
 #define FILE_WATCH_INTERVAL_MS 2000
-#define APP_VERSION "v0.21"
+#define APP_VERSION "v0.22"
 #define SUPPORT_URL "https://ko-fi.com/eenest"
 #define WINDOW_CONFIG_SECTION "window.gtk"
 
