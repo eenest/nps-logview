@@ -68,9 +68,12 @@ static int g_recent_count = 0;
 
 static ColDef col_defs[MAX_LIST_COLS];
 static int num_col_defs = 0;
+static char generic_col_names[MAX_LIST_COLS][32];
 static guint g_column_save_timeout = 0;
 static int g_restoring_columns = 0;
 static int g_snapping_paned = 0;
+
+static const char* RecordFieldValue(const NpsLogRecord* rec, const char* name);
 
 static void ApplyMonospaceFont(GtkWidget* widget)
 {
@@ -219,15 +222,16 @@ static void SetColumnHidden(const char* name, int hidden)
 static void SaveColumnWidths(void)
 {
     GList* cols;
-    int i = 0;
 
     if (!g_treeview) return;
     cols = gtk_tree_view_get_columns(GTK_TREE_VIEW(g_treeview));
-    for (GList* l = cols; l && i < num_col_defs; l = l->next, i++) {
+    for (GList* l = cols; l; l = l->next) {
+        GtkTreeViewColumn* column = GTK_TREE_VIEW_COLUMN(l->data);
+        const char* name = g_object_get_data(G_OBJECT(column), "field-name");
         char key[96];
-        int width = gtk_tree_view_column_get_width(GTK_TREE_VIEW_COLUMN(l->data));
-        if (width <= 0 || !col_defs[i].name) continue;
-        ColumnConfigKey(col_defs[i].name, key, sizeof(key));
+        int width = gtk_tree_view_column_get_width(column);
+        if (width <= 0 || !name) continue;
+        ColumnConfigKey(name, key, sizeof(key));
         config_set_int("columns", key, width);
     }
     g_list_free(cols);
@@ -338,6 +342,18 @@ static const char* DecodeForDisplay(const char* field_name, const char* value)
 
 static const char* ExtractEapMethod(const char* friendly);
 
+static int FieldColumnIndex(const char* field_name)
+{
+    int idx = 0;
+    char extra = '\0';
+
+    if (!field_name) return -1;
+    if (sscanf(field_name, "Field %d%c", &idx, &extra) == 1 && idx > 0) {
+        return idx - 1;
+    }
+    return -1;
+}
+
 static const char* RecordDisplayValue(const NpsLogRecord* rec, const char* field_name,
                                       int decode, char* out, size_t out_size)
 {
@@ -368,7 +384,8 @@ static const char* RecordDisplayValue(const NpsLogRecord* rec, const char* field
             }
         }
     } else {
-        val = nps_get_field(rec, 0);
+        int field_idx = FieldColumnIndex(field_name);
+        val = nps_get_field(rec, field_idx >= 0 ? field_idx : 0);
     }
 
     snprintf(out, out_size, "%s", val ? val : "");
@@ -394,6 +411,28 @@ static void BuildColumnDefs(void)
 
     num_col_defs = 0;
 
+    if (!g_logfile.has_header) {
+        int max_fields = 0;
+
+        for (int r = 0; r < g_logfile.count; r++) {
+            if (g_logfile.records[r].num_fields > max_fields) {
+                max_fields = g_logfile.records[r].num_fields;
+            }
+        }
+        if (max_fields <= 0) max_fields = 8;
+        if (max_fields > MAX_LIST_COLS) max_fields = MAX_LIST_COLS;
+
+        for (int i = 0; i < max_fields; i++) {
+            snprintf(generic_col_names[i], sizeof(generic_col_names[i]), "Field %d", i + 1);
+            col_defs[num_col_defs].name = generic_col_names[i];
+            col_defs[num_col_defs].title = generic_col_names[i];
+            col_defs[num_col_defs].width = 120;
+            col_defs[num_col_defs].decode = 0;
+            num_col_defs++;
+        }
+        return;
+    }
+
     for (int p = 0; priority[p].name && num_col_defs < MAX_LIST_COLS; p++) {
         int exists = 0;
         if (g_logfile.has_header) {
@@ -404,10 +443,7 @@ static void BuildColumnDefs(void)
                 }
             }
         }
-        if (!g_logfile.has_header && g_logfile.count > 0) {
-            exists = 1;
-        }
-        if ((exists || !g_logfile.has_header) && !IsColumnHidden(priority[p].name)) {
+        if (exists && !IsColumnHidden(priority[p].name)) {
             col_defs[num_col_defs++] = priority[p];
         }
     }
@@ -515,14 +551,12 @@ static int RowToRecord(int row)
 
 static int IsFailureRecord(const NpsLogRecord* rec)
 {
-    if (!rec || !rec->has_names) return 0;
-    for (int f = 0; f < rec->num_fields; f++) {
-        if (strcasecmp(rec->names[f], "Reason-Code") == 0) {
-            int code = atoi(rec->fields[f]);
-            return (code != 0);
-        }
-    }
-    return 0;
+    const char* reason;
+
+    if (!rec) return 0;
+    reason = RecordFieldValue(rec, "Reason-Code");
+    if (!reason) reason = RecordFieldValue(rec, "Reason_Code");
+    return (reason && reason[0] && atoi(reason) != 0);
 }
 
 static const char* RecordFieldValue(const NpsLogRecord* rec, const char* name)
@@ -731,42 +765,47 @@ static int RecordPassesFilter(int rec_idx)
 
 static void ApplyOrderingToVisibleRecords(void)
 {
-    int starts[MAX_RECORDS];
-    int lens[MAX_RECORDS];
+    int used[MAX_RECORDS] = {0};
     int temp[MAX_RECORDS];
-    int group_count = 0;
     int out = 0;
-    int i = 0;
 
     if (!g_recent_first || g_visible_count <= 1) return;
 
-    while (i < g_visible_count && group_count < MAX_RECORDS) {
-        int start = i;
-        int len = 1;
-        while (i + len < g_visible_count &&
-               SharePairKey(&g_logfile.records[g_visible_records[i + len - 1]],
-                            &g_logfile.records[g_visible_records[i + len]])) {
-            len++;
-        }
-        starts[group_count] = start;
-        lens[group_count] = len;
-        group_count++;
-        i += len;
-    }
+    for (int i = g_visible_count - 1; i >= 0 && out < MAX_RECORDS; i--) {
+        int group[MAX_RECORDS] = {0};
+        const NpsLogRecord* anchor;
 
-    for (int g = group_count - 1; g >= 0; g--) {
+        if (used[i]) continue;
+        anchor = &g_logfile.records[g_visible_records[i]];
+
+        for (int j = 0; j < g_visible_count; j++) {
+            if (!used[j] &&
+                (j == i ||
+                 SharePairKey(anchor, &g_logfile.records[g_visible_records[j]]))) {
+                group[j] = 1;
+            }
+        }
+
         for (int pass = 0; pass < 2; pass++) {
-            for (int j = 0; j < lens[g] && out < MAX_RECORDS; j++) {
-                int rec_idx = g_visible_records[starts[g] + j];
-                int is_request = IsAccessRequestRecord(&g_logfile.records[rec_idx]);
+            for (int j = 0; j < g_visible_count && out < MAX_RECORDS; j++) {
+                int rec_idx;
+                int is_request;
+
+                if (!group[j]) continue;
+                rec_idx = g_visible_records[j];
+                is_request = IsAccessRequestRecord(&g_logfile.records[rec_idx]);
                 if ((pass == 0 && is_request) || (pass == 1 && !is_request)) {
                     temp[out++] = rec_idx;
                 }
             }
         }
+
+        for (int j = 0; j < g_visible_count; j++) {
+            if (group[j]) used[j] = 1;
+        }
     }
 
-    for (i = 0; i < out; i++) {
+    for (int i = 0; i < out; i++) {
         g_visible_records[i] = temp[i];
     }
     g_visible_count = out;
@@ -911,6 +950,7 @@ static void UpdateStatusBar(void)
 {
     const char* fname = g_current_file[0] ? g_current_file : "No file";
     const char* slash = strrchr(fname, '/');
+    const char* cap = g_logfile.truncated ? " | WARNING: record limit reached" : "";
     char short_name[160];
     if (slash) fname = slash + 1;
     CopyTruncated(short_name, sizeof(short_name), fname);
@@ -918,16 +958,16 @@ static void UpdateStatusBar(void)
     char buf[512];
     if (g_file_changed && g_current_file[0]) {
         snprintf(buf, sizeof(buf),
-                 "%s | visible %d of %d | loaded %s in %ldms | size %ld KB | changed: yes",
+                 "%s | visible %d of %d | loaded %s in %ldms | size %ld KB | changed: yes%s",
                  short_name, g_visible_count, g_logfile.count,
                  g_load_time[0] ? g_load_time : "-", g_load_ms,
-                 (g_load_file_size + 1023) / 1024);
+                 (g_load_file_size + 1023) / 1024, cap);
     } else if (g_current_file[0]) {
         snprintf(buf, sizeof(buf),
-                 "%s | visible %d of %d | loaded %s in %ldms | size %ld KB | changed: no",
+                 "%s | visible %d of %d | loaded %s in %ldms | size %ld KB | changed: no%s",
                  short_name, g_visible_count, g_logfile.count,
                  g_load_time[0] ? g_load_time : "-", g_load_ms,
-                 (g_load_file_size + 1023) / 1024);
+                 (g_load_file_size + 1023) / 1024, cap);
     } else {
         snprintf(buf, sizeof(buf), "Ready");
     }
@@ -1140,7 +1180,7 @@ static void LoadFile(const char* path)
     FILE* fp;
     long size;
     LoadProgressCtx progress = {0};
-    clock_t start_clock = clock();
+    gint64 start_us = g_get_monotonic_time();
 
     if (stat(path, &st) != 0) {
         GtkWidget* dlg = gtk_message_dialog_new(GTK_WINDOW(g_window),
@@ -1189,7 +1229,7 @@ static void LoadFile(const char* path)
     nps_parse_stream(fp, size, &g_logfile, OnLoadProgress, &progress);
     fclose(fp);
     SetStatusTextNow("Building view...");
-    g_load_ms = (long)(((clock() - start_clock) * 1000) / CLOCKS_PER_SEC);
+    g_load_ms = (long)((g_get_monotonic_time() - start_us) / 1000);
     {
         time_t now = time(NULL);
         struct tm* tm_now = localtime(&now);

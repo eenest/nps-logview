@@ -16,9 +16,17 @@
 - Clarified README install/run instructions for the portable no-installer release packages.
 - Documented where `nps-logview.ini` is stored on Windows and Linux, including portable executable-folder priority, write-test rules, per-user fallback paths, and per-build window sections.
 - Added the resolved `nps-logview.ini` path to the Windows and Linux About dialogs.
+- Improved INI saving so fallback settings paths create missing parent directories and long string settings are not capped at 255 bytes.
 - Added streamed file loading for GTK, Windows 64-bit, Windows 32-bit, and the CLI parser helper.
 - Added bottom status-bar progress during file loading.
 - Removed the GUI 50 MB file-size rejection; loaded records remain capped at 4,096.
+- Fixed CSV/header log rejected detection so filtering, red-row highlighting, rejected pair highlighting, and rejected export styling match XML behavior.
+- Fixed no-header CSV/IAS list display to use positional `Field 1`, `Field 2`, etc. columns instead of repeating the first field.
+- Added a GUI status warning when a file contains more parseable records than the 4,096-record load cap.
+- Added XML entity decoding for parsed field values and whitespace-delimited IAS text parsing when no CSV/tab separators are present.
+- Fixed GTK column width persistence after column reordering and changed GTK load timing to monotonic elapsed time.
+- Made public release packaging tolerate an empty `doc/screenshots/` directory.
+- Improved Most Recent First ordering so non-adjacent request/reply records with the same pair key stay grouped with requests before replies.
 - Added row-boundary snapping for the list/details splitter.
 - Added a Windows system-DPI-aware manifest to both Windows builds.
 - Expanded README log format documentation for XML, CSV/text, decoding behavior, request/reply pairing, and parser limits.

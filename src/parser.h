@@ -35,6 +35,7 @@ typedef struct {
     int has_header;
     char header[MAX_FIELDS][MAX_NAME_LEN];
     int header_count;
+    int truncated;  /* 1 if parseable records were skipped after MAX_RECORDS */
 } NpsLogFile;
 
 typedef void (*NpsParseProgressCb)(long bytes_read, long total_bytes, void* userdata);

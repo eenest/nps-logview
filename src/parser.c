@@ -31,6 +31,24 @@ static char* trim(char* str)
     return str;
 }
 
+static int has_unquoted_delimiter(const char* line, char delim)
+{
+    int in_quotes = 0;
+
+    for (const char* p = line; p && *p; p++) {
+        if (*p == '"') {
+            if (in_quotes && *(p + 1) == '"') {
+                p++;
+            } else {
+                in_quotes = !in_quotes;
+            }
+            continue;
+        }
+        if (!in_quotes && *p == delim) return 1;
+    }
+    return 0;
+}
+
 static char* duplicate_raw_line(const char* line)
 {
     static const char suffix[] = " ... [raw record truncated]";
@@ -97,6 +115,7 @@ void nps_logfile_free(NpsLogFile* logfile)
     logfile->capacity = 0;
     logfile->has_header = 0;
     logfile->header_count = 0;
+    logfile->truncated = 0;
 }
 
 /* Parse a CSV line, handling quoted fields */
@@ -106,11 +125,17 @@ int nps_parse_line(const char* line, NpsLogRecord* record)
     int field = 0;
     int in_quotes = 0;
     int len = 0;
+    int split_on_space;
 
     record->num_fields = 0;
     record->has_names = 0;
 
     if (!line || !*line) return 0;
+    split_on_space = !has_unquoted_delimiter(line, ',') &&
+                     !has_unquoted_delimiter(line, '\t');
+    if (split_on_space) {
+        while (isspace((unsigned char)*p)) p++;
+    }
 
     while (*p && field < MAX_FIELDS) {
         if (*p == '"') {
@@ -128,11 +153,16 @@ int nps_parse_line(const char* line, NpsLogRecord* record)
             }
         }
 
-        if ((*p == ',' || *p == '\t') && !in_quotes) {
+        if (!in_quotes &&
+            ((*p == ',' || *p == '\t') ||
+             (split_on_space && isspace((unsigned char)*p)))) {
             record->fields[field][len] = '\0';
             field++;
             len = 0;
             p++;
+            if (split_on_space) {
+                while (isspace((unsigned char)*p)) p++;
+            }
             continue;
         }
 
@@ -158,6 +188,92 @@ int nps_parse_line(const char* line, NpsLogRecord* record)
     }
 
     return field;
+}
+
+static int hex_digit_value(char ch)
+{
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+}
+
+static int decode_numeric_entity(const char* text, int* consumed)
+{
+    int base = 10;
+    int value = 0;
+    int digits = 0;
+    const char* p = text;
+
+    if (p[0] != '&' || p[1] != '#') return -1;
+    p += 2;
+    if (*p == 'x' || *p == 'X') {
+        base = 16;
+        p++;
+    }
+
+    while (*p && *p != ';') {
+        int digit = base == 16 ? hex_digit_value(*p) :
+                    (isdigit((unsigned char)*p) ? *p - '0' : -1);
+        if (digit < 0 || digit >= base) return -1;
+        if (value < 256) value = value * base + digit;
+        digits++;
+        p++;
+    }
+
+    if (*p != ';' || digits == 0) return -1;
+    *consumed = (int)(p - text + 1);
+    return value <= 255 ? value : '?';
+}
+
+static void decode_xml_entities(const char* src, int src_len,
+                                char* out, size_t out_size)
+{
+    size_t pos = 0;
+
+    if (!out || out_size == 0) return;
+    out[0] = '\0';
+    if (!src || src_len <= 0) return;
+
+    for (int i = 0; i < src_len && pos + 1 < out_size; i++) {
+        if (src[i] == '&') {
+            int consumed = 0;
+            int decoded = decode_numeric_entity(src + i, &consumed);
+
+            if (decoded >= 0) {
+                out[pos++] = (char)decoded;
+                i += consumed - 1;
+                continue;
+            }
+            if (i + 5 <= src_len && strncmp(src + i, "&amp;", 5) == 0) {
+                out[pos++] = '&';
+                i += 4;
+                continue;
+            }
+            if (i + 4 <= src_len && strncmp(src + i, "&lt;", 4) == 0) {
+                out[pos++] = '<';
+                i += 3;
+                continue;
+            }
+            if (i + 4 <= src_len && strncmp(src + i, "&gt;", 4) == 0) {
+                out[pos++] = '>';
+                i += 3;
+                continue;
+            }
+            if (i + 6 <= src_len && strncmp(src + i, "&quot;", 6) == 0) {
+                out[pos++] = '"';
+                i += 5;
+                continue;
+            }
+            if (i + 6 <= src_len && strncmp(src + i, "&apos;", 6) == 0) {
+                out[pos++] = '\'';
+                i += 5;
+                continue;
+            }
+        }
+        out[pos++] = src[i];
+    }
+    out[pos] = '\0';
 }
 
 /* Simple XML event parser for NPS log format */
@@ -222,9 +338,9 @@ static int parse_xml_event(const char* line, NpsLogRecord* record)
         if (record->num_fields < MAX_FIELDS) {
             memcpy(record->names[record->num_fields], tag_name, tag_len + 1);
             if (val_len > 0) {
-                int copy_len = val_len < MAX_FIELD_LEN ? val_len : MAX_FIELD_LEN - 1;
-                memcpy(record->fields[record->num_fields], val_start, copy_len);
-                record->fields[record->num_fields][copy_len] = '\0';
+                decode_xml_entities(val_start, val_len,
+                                    record->fields[record->num_fields],
+                                    sizeof(record->fields[record->num_fields]));
             } else {
                 record->fields[record->num_fields][0] = '\0';
             }
@@ -296,7 +412,10 @@ static int store_parsed_record(NpsLogFile* logfile, NpsLogRecord* rec,
         NpsLogRecord* new_rec;
 
         if (new_cap > MAX_RECORDS) new_cap = MAX_RECORDS;
-        if (new_cap <= logfile->capacity) return 0;
+        if (new_cap <= logfile->capacity) {
+            logfile->truncated = 1;
+            return 0;
+        }
 
         new_rec = (NpsLogRecord*)realloc(logfile->records,
                                          new_cap * sizeof(NpsLogRecord));
@@ -350,7 +469,7 @@ int nps_parse_file(const char* text, NpsLogFile* logfile)
         return 0;
     }
 
-    while (*p && logfile->count < MAX_RECORDS) {
+    while (*p) {
         line_len = 0;
         while (*p && *p != '\n') {
             if (line_len + 1 >= buffer_cap) {
@@ -442,7 +561,7 @@ int nps_parse_stream(FILE* fp, long total_bytes, NpsLogFile* logfile,
     memset(&reader, 0, sizeof(reader));
     reader.fp = fp;
 
-    while (logfile->count < MAX_RECORDS) {
+    while (1) {
         int read_result = read_stream_line(&reader, &buffer, &buffer_cap);
         char* trimmed;
 

@@ -53,6 +53,7 @@ See [SUPPORT.md](SUPPORT.md) for the support note included with release packages
 - **Copy record from the list** — right-click a record in the top pane and choose Copy Record, or use the Edit menu / Ctrl+C
 - **Pair-aware filtering** — filter by user/account/value or show rejected exchanges while keeping related request/reply records together
 - **Rejected exchange highlighting** — if either record in a request/reply exchange is rejected (`Reason-Code` is non-zero), both the request row and reply row are highlighted in red
+- **Consistent rejected detection** — XML logs and CSV/header logs use the same `Reason-Code` lookup for rejected-only filtering, row coloring, pairing, and export styling
 - **Timestamp header ordering** — clicking the timestamp column toggles the same Most Recent First setting saved in the INI file, while each request/reply exchange still displays request first
 - **Column customization** — hide/show columns from Settings → Columns, drag columns to reorder them, and keep widths/order across app runs
 - **Export decoded logs** — export the visible decoded records to CSV, plain text, or HTML
@@ -133,7 +134,7 @@ Placement rules:
 1. The app finds the folder where the running executable is located.
 2. It tests whether that folder is writable by creating and removing a temporary `.writetest` file.
 3. If the executable folder is writable, the app uses `nps-logview.ini` in that same folder. This is the portable mode and has priority over all fallback locations.
-4. If the executable folder is not writable, the app uses the per-user fallback location for the current system.
+4. If the executable folder is not writable, the app uses the per-user fallback location for the current system and creates missing parent folders as needed.
 5. If you move the executable to another writable folder, that folder will get its own portable `nps-logview.ini`. To keep the same settings, move the INI file with the executable or use the per-user fallback location.
 
 | System | Preferred Portable Location | Fallback Per-User Location |
@@ -145,7 +146,7 @@ On Windows, if neither `LOCALAPPDATA` nor `APPDATA` is available, the app falls 
 
 If you extract the app to a writable folder such as Downloads or your home directory, the INI usually stays beside the executable. If you place it somewhere protected, such as `Program Files` on Windows or a system-owned directory on Linux, the per-user fallback is used.
 
-Windows 64-bit, Windows 32-bit, and Linux can share one INI file safely. Build-specific window placement is stored in separate sections: `[window.win64]`, `[window.win32]`, and `[window.gtk]`. Shared settings such as recent files, column layout, and Most Recent First are stored in shared sections such as `[recent]`, `[columns]`, `[columns.hidden]`, and `[settings]`.
+Windows 64-bit, Windows 32-bit, and Linux can share one INI file safely. Build-specific window placement is stored in separate sections: `[window.win64]`, `[window.win32]`, and `[window.gtk]`. Shared settings such as recent files, column layout, and Most Recent First are stored in shared sections such as `[recent]`, `[columns]`, `[columns.hidden]`, and `[settings]`. String values can hold long paths and saved layout data up to 4,095 characters.
 
 To reset preferences, close the app and remove or rename `nps-logview.ini` from the location shown in **Help -> About**.
 
@@ -341,7 +342,7 @@ Each child tag inside `<Event>` becomes a field name. For example:
 <Reason-Code>0</Reason-Code>
 ```
 
-These become the `Timestamp`, `User-Name`, `Packet-Type`, and `Reason-Code` columns/fields in the viewer. XML tag attributes such as `data_type` are ignored; the tag text is used as the field value.
+These become the `Timestamp`, `User-Name`, `Packet-Type`, and `Reason-Code` columns/fields in the viewer. XML tag attributes such as `data_type` are ignored; the tag text is used as the field value. Common XML entities such as `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, and numeric entities are decoded before display and filtering.
 
 The bundled sample logs use only synthetic or anonymized values. `CORPN` is the fictional company name used in sample accounts, hosts, policies, clients, and SSIDs. `logs/sample-nps.log` is a small hand-written sample; `logs/sample-IN260429.log` and `logs/sample-IN260430.log` are larger realistic test logs generated from private captures after replacing users, domains, host names, client names, IP addresses, MAC addresses, session IDs, policies, and embedded Vendor-Specific strings.
 
@@ -363,7 +364,7 @@ Common NPS fields used by the GUI include:
 
 ### CSV and Text
 
-CSV/text files are parsed line by line. The parser supports comma-separated and tab-separated fields, quoted CSV values, and escaped quotes (`""`) inside quoted values.
+CSV/text files are parsed line by line. The parser supports comma-separated, tab-separated, and whitespace-delimited IAS-style fields, quoted CSV values, and escaped quotes (`""`) inside quoted values. Whitespace is used as a delimiter only when a line has no unquoted comma or tab separators.
 
 For CSV-like files, the first row is treated as a header only when most fields look like names rather than data. Rows beginning with NPS/IAS data markers such as `NPAS`, `NPS`, or `IAS` are treated as data, not headers. If no header is detected, the viewer falls back to generic field names.
 
@@ -382,14 +383,14 @@ The detail pane, exports, and visible columns use the shared decoder. It expands
 
 Filtering, rejected highlighting, and most-recent-first ordering are request/reply aware. When `Class` exists on both records, it is the preferred pairing key. `Acct-Session-Id` is only used as a fallback when `Class` is missing, and matching timestamps are used when available to avoid grouping separate authentications that reused the same session ID.
 
-Within a pair or exchange group, Access-Request records are displayed before reply records even when Most Recent First is enabled.
+Within a pair or exchange group, Access-Request records are displayed before reply records even when Most Recent First is enabled. Pair grouping uses the visible records' `Class` or `Acct-Session-Id` keys even if the matching request and reply were not adjacent in the original log.
 
 Station/MAC filtering accepts common formats interchangeably for calling/called station IDs, including Windows style (`AA-BB-CC-DD-EE-FF`), standard colon style (`aa:bb:cc:dd:ee:ff`), and Cisco style (`aabb.ccdd.eeff`).
 
 ### Limits
 
 - GUI file loading rejects empty files, but reads non-empty files as a stream instead of allocating the whole file.
-- Up to 4,096 records are loaded per file.
+- Up to 4,096 records are loaded per file. If a larger file contains more parseable records, the GUI status bar shows a record-limit warning.
 - Up to 64 fields are stored per record.
 - Each field value is capped at 512 characters.
 - Each XML field name is capped at 64 characters.

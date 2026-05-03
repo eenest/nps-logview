@@ -111,6 +111,7 @@ static DWORD g_load_file_size = 0;
 
 static void OnListSelect(int index);
 static void OpenSupportPage(HWND hwnd);
+static const char* RecordFieldValue(const NpsLogRecord* rec, const char* name);
 
 static LRESULT CALLBACK SplitterProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -228,6 +229,7 @@ typedef struct {
 /* Priority columns for the list view — these fields are shown first so success/failure is visible at a glance */
 static ColDef col_defs[MAX_LIST_COLS];
 static int num_col_defs = 0;
+static char generic_col_names[MAX_LIST_COLS][32];
 
 static void ColumnConfigKey(const char* name, char* out, size_t out_size)
 {
@@ -532,6 +534,18 @@ static void ShowVendorReferenceWindow(HWND parent)
 
 static const char* ExtractEapMethod(const char* friendly);
 
+static int FieldColumnIndex(const char* field_name)
+{
+    int idx = 0;
+    char extra = '\0';
+
+    if (!field_name) return -1;
+    if (sscanf(field_name, "Field %d%c", &idx, &extra) == 1 && idx > 0) {
+        return idx - 1;
+    }
+    return -1;
+}
+
 static const char* DecodeForDisplay(const char* field_name, const char* value)
 {
     static char buf[512];
@@ -573,7 +587,8 @@ static const char* RecordDisplayValue(const NpsLogRecord* rec, const char* field
             }
         }
     } else {
-        val = nps_get_field(rec, 0);
+        int field_idx = FieldColumnIndex(field_name);
+        val = nps_get_field(rec, field_idx >= 0 ? field_idx : 0);
     }
 
     snprintf(out, out_size, "%s", val ? val : "");
@@ -600,6 +615,28 @@ static void BuildColumnDefs(void)
 
     num_col_defs = 0;
 
+    if (!g_logfile.has_header) {
+        int max_fields = 0;
+
+        for (int r = 0; r < g_logfile.count; r++) {
+            if (g_logfile.records[r].num_fields > max_fields) {
+                max_fields = g_logfile.records[r].num_fields;
+            }
+        }
+        if (max_fields <= 0) max_fields = 8;
+        if (max_fields > MAX_LIST_COLS) max_fields = MAX_LIST_COLS;
+
+        for (int i = 0; i < max_fields; i++) {
+            snprintf(generic_col_names[i], sizeof(generic_col_names[i]), "Field %d", i + 1);
+            col_defs[num_col_defs].name = generic_col_names[i];
+            col_defs[num_col_defs].title = generic_col_names[i];
+            col_defs[num_col_defs].width = 120;
+            col_defs[num_col_defs].decode = 0;
+            num_col_defs++;
+        }
+        return;
+    }
+
     /* Add priority columns that actually exist in the data */
     for (int p = 0; priority[p].name && num_col_defs < MAX_LIST_COLS; p++) {
         int exists = 0;
@@ -611,12 +648,7 @@ static void BuildColumnDefs(void)
                 }
             }
         }
-        /* For non-XML without headers, still show priority columns if we have enough fields */
-        if (!g_logfile.has_header && g_logfile.count > 0) {
-            /* heuristic: always include for no-header mode if field index is within range */
-            exists = 1;
-        }
-        if ((exists || !g_logfile.has_header) && !IsColumnHidden(priority[p].name)) {
+        if (exists && !IsColumnHidden(priority[p].name)) {
             col_defs[num_col_defs++] = priority[p];
         }
     }
@@ -823,22 +855,23 @@ static void UpdateStatusBar(void)
 {
     char buf[256];
     const char* fname = g_current_file[0] ? g_current_file : "No file";
+    const char* cap = g_logfile.truncated ? " | WARNING: record limit reached" : "";
     const char* slash = strrchr(fname, '\\');
     if (!slash) slash = strrchr(fname, '/');
     if (slash) fname = slash + 1;
 
     if (g_file_changed && g_current_file[0]) {
         snprintf(buf, sizeof(buf),
-                 "%s | visible %d of %d | loaded %s in %lums | size %lu KB | changed: yes",
+                 "%s | visible %d of %d | loaded %s in %lums | size %lu KB | changed: yes%s",
                  fname, g_visible_count, g_logfile.count,
                  g_load_time[0] ? g_load_time : "-", (unsigned long)g_load_ms,
-                 (unsigned long)((g_load_file_size + 1023) / 1024));
+                 (unsigned long)((g_load_file_size + 1023) / 1024), cap);
     } else if (g_current_file[0]) {
         snprintf(buf, sizeof(buf),
-                 "%s | visible %d of %d | loaded %s in %lums | size %lu KB | changed: no",
+                 "%s | visible %d of %d | loaded %s in %lums | size %lu KB | changed: no%s",
                  fname, g_visible_count, g_logfile.count,
                  g_load_time[0] ? g_load_time : "-", (unsigned long)g_load_ms,
-                 (unsigned long)((g_load_file_size + 1023) / 1024));
+                 (unsigned long)((g_load_file_size + 1023) / 1024), cap);
     } else {
         snprintf(buf, sizeof(buf), "Ready");
     }
@@ -1195,14 +1228,12 @@ static void LoadFile(const char* path)
 
 static int IsFailureRecord(const NpsLogRecord* rec)
 {
-    if (!rec || !rec->has_names) return 0;
-    for (int f = 0; f < rec->num_fields; f++) {
-        if (strcasecmp(rec->names[f], "Reason-Code") == 0) {
-            int code = atoi(rec->fields[f]);
-            return (code != 0);
-        }
-    }
-    return 0;
+    const char* reason;
+
+    if (!rec) return 0;
+    reason = RecordFieldValue(rec, "Reason-Code");
+    if (!reason) reason = RecordFieldValue(rec, "Reason_Code");
+    return (reason && reason[0] && atoi(reason) != 0);
 }
 
 static const char* RecordFieldValue(const NpsLogRecord* rec, const char* name)
@@ -1411,51 +1442,47 @@ static int RecordPassesFilter(int rec_idx)
 
 static void ApplyOrderingToVisibleRecords(void)
 {
-    int starts[MAX_RECORDS];
-    int lens[MAX_RECORDS];
-    int order[MAX_RECORDS];
+    int used[MAX_RECORDS] = {0};
     int temp[MAX_RECORDS];
-    int group_count = 0;
     int out = 0;
-    int i = 0;
 
     if (!g_recent_first || g_visible_count <= 1) return;
 
-    while (i < g_visible_count && group_count < MAX_RECORDS) {
-        int start = i;
-        int len = 1;
-        while (i + len < g_visible_count &&
-               SharePairKey(&g_logfile.records[g_visible_records[i + len - 1]],
-                            &g_logfile.records[g_visible_records[i + len]])) {
-            len++;
+    for (int i = g_visible_count - 1; i >= 0 && out < MAX_RECORDS; i--) {
+        int group[MAX_RECORDS] = {0};
+        const NpsLogRecord* anchor;
+
+        if (used[i]) continue;
+        anchor = &g_logfile.records[g_visible_records[i]];
+
+        for (int j = 0; j < g_visible_count; j++) {
+            if (!used[j] &&
+                (j == i ||
+                 SharePairKey(anchor, &g_logfile.records[g_visible_records[j]]))) {
+                group[j] = 1;
+            }
         }
-        starts[group_count] = start;
-        lens[group_count] = len;
-        order[group_count] = group_count;
-        group_count++;
-        i += len;
-    }
 
-    for (int a = 0; a < group_count / 2; a++) {
-        int swap = order[a];
-        order[a] = order[group_count - 1 - a];
-        order[group_count - 1 - a] = swap;
-    }
-
-    for (int pos = 0; pos < group_count; pos++) {
-        int g = order[pos];
         for (int pass = 0; pass < 2; pass++) {
-            for (int j = 0; j < lens[g] && out < MAX_RECORDS; j++) {
-                int rec_idx = g_visible_records[starts[g] + j];
-                int is_request = IsAccessRequestRecord(&g_logfile.records[rec_idx]);
+            for (int j = 0; j < g_visible_count && out < MAX_RECORDS; j++) {
+                int rec_idx;
+                int is_request;
+
+                if (!group[j]) continue;
+                rec_idx = g_visible_records[j];
+                is_request = IsAccessRequestRecord(&g_logfile.records[rec_idx]);
                 if ((pass == 0 && is_request) || (pass == 1 && !is_request)) {
                     temp[out++] = rec_idx;
                 }
             }
         }
+
+        for (int j = 0; j < g_visible_count; j++) {
+            if (group[j]) used[j] = 1;
+        }
     }
 
-    for (i = 0; i < out; i++) {
+    for (int i = 0; i < out; i++) {
         g_visible_records[i] = temp[i];
     }
     g_visible_count = out;

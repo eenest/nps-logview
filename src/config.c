@@ -20,15 +20,18 @@
 #endif
 
 #define MAX_ENTRIES 512
-#define MAX_STRLEN  256
+#define MAX_SECTION_LEN 128
+#define MAX_KEY_LEN     128
+#define MAX_VALUE_LEN   4096
+#define MAX_CONFIG_PATH 4096
 
 typedef struct {
-    char section[MAX_STRLEN];
-    char key[MAX_STRLEN];
-    char value[MAX_STRLEN];
+    char section[MAX_SECTION_LEN];
+    char key[MAX_KEY_LEN];
+    char value[MAX_VALUE_LEN];
 } ConfigEntry;
 
-static char g_config_path[1024] = {0};
+static char g_config_path[MAX_CONFIG_PATH] = {0};
 static ConfigEntry g_entries[MAX_ENTRIES];
 static int g_entry_count = 0;
 static int g_loaded = 0;
@@ -69,7 +72,13 @@ static int find_entry(const char* section, const char* key)
 
 static void set_entry_value(const char* section, const char* key, const char* val)
 {
-    int idx = find_entry(section, key);
+    int idx;
+
+    if (!section) section = "";
+    if (!key) key = "";
+    if (!val) val = "";
+    idx = find_entry(section, key);
+
     if (idx >= 0) {
         strncpy(g_entries[idx].value, val, sizeof(g_entries[idx].value) - 1);
         g_entries[idx].value[sizeof(g_entries[idx].value) - 1] = '\0';
@@ -131,13 +140,59 @@ static void copy_path(char* out, size_t out_size, const char* path)
     out[len] = '\0';
 }
 
+static void append_text(char* out, size_t out_size, const char* text)
+{
+    size_t len;
+
+    if (!out || out_size == 0) return;
+    if (!text) text = "";
+    len = strlen(out);
+    if (len >= out_size) return;
+    copy_path(out + len, out_size - len, text);
+}
+
+static void make_ini_name(char* out, size_t out_size, const char* app_name)
+{
+    copy_path(out, out_size, app_name && *app_name ? app_name : "nps-logview");
+    append_text(out, out_size, ".ini");
+}
+
+static int path_has_trailing_sep(const char* path, char sep)
+{
+    size_t len;
+
+    if (!path || !*path) return 0;
+    len = strlen(path);
+    if (path[len - 1] == sep) return 1;
+#ifdef _WIN32
+    if (path[len - 1] == '\\' || path[len - 1] == '/') return 1;
+#endif
+    return 0;
+}
+
+static void join_path(char* out, size_t out_size, const char* dir,
+                      char sep, const char* leaf)
+{
+    copy_path(out, out_size, dir && *dir ? dir : ".");
+    if (!path_has_trailing_sep(out, sep)) {
+        char sep_text[2];
+        sep_text[0] = sep;
+        sep_text[1] = '\0';
+        append_text(out, out_size, sep_text);
+    }
+    append_text(out, out_size, leaf);
+}
+
 static void ensure_dir(const char* path)
 {
-    char dir[1024];
+    char dir[MAX_CONFIG_PATH];
     const char* last_slash;
+    char* p;
 
 #ifdef _WIN32
-    last_slash = strrchr(path, '\\');
+    const char* slash_a = strrchr(path, '\\');
+    const char* slash_b = strrchr(path, '/');
+    last_slash = (!slash_a || (slash_b && slash_b > slash_a)) ? slash_b : slash_a;
 #else
     last_slash = strrchr(path, '/');
 #endif
@@ -149,17 +204,47 @@ static void ensure_dir(const char* path)
     dir[len] = '\0';
 
 #ifdef _WIN32
+    p = dir;
+    if (isalpha((unsigned char)p[0]) && p[1] == ':' && (p[2] == '\\' || p[2] == '/')) {
+        p += 3;
+    } else if ((p[0] == '\\' || p[0] == '/') && (p[1] == '\\' || p[1] == '/')) {
+        p += 2;
+        while (*p && *p != '\\' && *p != '/') p++;
+        if (*p) p++;
+        while (*p && *p != '\\' && *p != '/') p++;
+        if (*p) p++;
+    }
+    for (; *p; p++) {
+        if (*p == '\\' || *p == '/') {
+            char saved = *p;
+            *p = '\0';
+            if (dir[0]) CreateDirectoryA(dir, NULL);
+            *p = saved;
+        }
+    }
     CreateDirectoryA(dir, NULL);
 #else
+    p = dir;
+    if (*p == '/') p++;
+    for (; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (dir[0]) mkdir(dir, 0755);
+            *p = '/';
+        }
+    }
     mkdir(dir, 0755);
 #endif
 }
 
 static void resolve_config_path(const char* app_name, char* out, size_t out_size)
 {
-    char exec_dir[1024];
-    char path_buf[2048];
+    char exec_dir[MAX_CONFIG_PATH];
+    char path_buf[MAX_CONFIG_PATH];
+    char dir_buf[MAX_CONFIG_PATH];
+    char ini_name[MAX_KEY_LEN + 8];
 
+    make_ini_name(ini_name, sizeof(ini_name), app_name);
 #ifdef _WIN32
     char exe_path[MAX_PATH];
     GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
@@ -172,13 +257,13 @@ static void resolve_config_path(const char* app_name, char* out, size_t out_size
     }
     exec_dir[sizeof(exec_dir) - 1] = '\0';
 
-    char test_path[2048];
-    snprintf(test_path, sizeof(test_path), "%s\\.writetest", exec_dir);
+    char test_path[MAX_CONFIG_PATH];
+    join_path(test_path, sizeof(test_path), exec_dir, '\\', ".writetest");
     FILE* fp = fopen(test_path, "w");
     if (fp) {
         fclose(fp);
         remove(test_path);
-        snprintf(path_buf, sizeof(path_buf), "%s\\%s.ini", exec_dir, app_name);
+        join_path(path_buf, sizeof(path_buf), exec_dir, '\\', ini_name);
         copy_path(out, out_size, path_buf);
         return;
     }
@@ -186,10 +271,11 @@ static void resolve_config_path(const char* app_name, char* out, size_t out_size
     const char* local_appdata = getenv("LOCALAPPDATA");
     if (!local_appdata) local_appdata = getenv("APPDATA");
     if (!local_appdata) local_appdata = ".";
-    snprintf(path_buf, sizeof(path_buf), "%s\\%s\\%s.ini", local_appdata, app_name, app_name);
+    join_path(dir_buf, sizeof(dir_buf), local_appdata, '\\', app_name);
+    join_path(path_buf, sizeof(path_buf), dir_buf, '\\', ini_name);
     copy_path(out, out_size, path_buf);
 #else
-    char exe_path[1024];
+    char exe_path[MAX_CONFIG_PATH];
     ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
     if (len != -1) {
         exe_path[len] = '\0';
@@ -205,20 +291,23 @@ static void resolve_config_path(const char* app_name, char* out, size_t out_size
     }
     exec_dir[sizeof(exec_dir) - 1] = '\0';
 
-    char test_path[2048];
-    snprintf(test_path, sizeof(test_path), "%s/.writetest", exec_dir);
+    char test_path[MAX_CONFIG_PATH];
+    join_path(test_path, sizeof(test_path), exec_dir, '/', ".writetest");
     FILE* fp = fopen(test_path, "w");
     if (fp) {
         fclose(fp);
         remove(test_path);
-        snprintf(path_buf, sizeof(path_buf), "%s/%s.ini", exec_dir, app_name);
+        join_path(path_buf, sizeof(path_buf), exec_dir, '/', ini_name);
         copy_path(out, out_size, path_buf);
         return;
     }
 
     const char* home = getenv("HOME");
     if (!home) home = ".";
-    snprintf(path_buf, sizeof(path_buf), "%s/.config/%s/%s.ini", home, app_name, app_name);
+    join_path(dir_buf, sizeof(dir_buf), home, '/', ".config");
+    join_path(path_buf, sizeof(path_buf), dir_buf, '/', app_name);
+    join_path(dir_buf, sizeof(dir_buf), path_buf, '/', ini_name);
+    copy_path(path_buf, sizeof(path_buf), dir_buf);
     copy_path(out, out_size, path_buf);
 #endif
 }
@@ -236,8 +325,8 @@ void config_init(const char* app_name)
         return;
     }
 
-    char line[1024];
-    char current_section[MAX_STRLEN] = "";
+    char line[MAX_VALUE_LEN + MAX_KEY_LEN + 8];
+    char current_section[MAX_SECTION_LEN] = "";
 
     while (fgets(line, sizeof(line), fp) && g_entry_count < MAX_ENTRIES) {
         strip_newline(line);
