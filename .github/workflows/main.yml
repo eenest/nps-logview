@@ -1,0 +1,10 @@
+Add GitHub Actions release builds
+Add a GitHub Actions workflow that builds the supported release targets:
+
+- Windows x64
+- Windows x86
+- Linux x86_64 GTK
+
+The workflow should produce downloadable artifacts and help verify that public source builds cleanly before each release.
+
+This is future release automation work, not required for v0.21.
